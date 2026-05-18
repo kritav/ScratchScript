@@ -1,0 +1,51 @@
+project
+  variable score = 0
+  backdrops "Blue Sky"
+
+  sprite Paddle
+    costumes "ball-a"
+    position 0, -150
+    size 150
+    direction 90
+
+    script
+      when flag clicked
+        set score to 0
+        show variable score
+        go to x y 0 -150
+        forever
+          set x to mouse x
+
+  sprite Ball
+    costumes "ball-a"
+    position 0, 0
+    size 50
+
+    variable speedX = 5
+    variable speedY = 5
+
+    script
+      when flag clicked
+        go to x y 0 100
+        set speedX to 5
+        set speedY to -5
+        forever
+          change x by speedX
+          change y by speedY
+          // bounce off walls
+          if x position > 230
+            set speedX to (0 - speedX)
+          if x position < -230
+            set speedX to (0 - speedX)
+          // bounce off top
+          if y position > 170
+            set speedY to (0 - speedY)
+          // bounce off paddle
+          if touching "Paddle"
+            set speedY to (0 - speedY)
+            change score by 1
+            start sound "Pop"
+          // fall off bottom
+          if y position < -180
+            say "Game Over!" 2
+            stop all

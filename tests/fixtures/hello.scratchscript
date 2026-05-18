@@ -1,0 +1,14 @@
+project
+  sprite Cat
+    costumes "cat-a", "cat-b"
+    sounds "Meow"
+    position 0, 0
+    size 100
+
+    script
+      when flag clicked
+        say "Hello, Scratch!" 2
+        repeat 4
+          move 50
+          turn right 90
+          wait 0.5

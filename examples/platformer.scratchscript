@@ -1,0 +1,70 @@
+project
+  variable score = 0
+  backdrops "Blue Sky"
+
+  sprite Player
+    costumes "cat-a", "cat-b"
+    position -200, -100
+    size 60
+
+    variable velocityY = 0
+    variable onGround = 1
+    variable speed = 5
+
+    script
+      when flag clicked
+        go to x y -200 -100
+        set velocityY to 0
+        set onGround to 1
+        set score to 0
+        show variable score
+        forever
+          // gravity
+          change velocityY by -1
+          change y by velocityY
+          // ground collision
+          if y position < -150
+            set y to -150
+            set velocityY to 0
+            set onGround to 1
+          // animate
+          next costume
+          wait 0.1
+
+    script
+      when key right arrow pressed
+        change x by speed
+
+    script
+      when key left arrow pressed
+        change x by (0 - speed)
+
+    script
+      when key up arrow pressed
+        if onGround = 1
+          set velocityY to 12
+          set onGround to 0
+
+  sprite Coin
+    costumes "ball-a"
+    position 100, -100
+    size 30
+    visible false
+
+    script
+      when flag clicked
+        hide
+        forever
+          create clone of "myself"
+          wait 3
+
+    script
+      when I start as a clone
+        show
+        go to x y (pick random -200 200) (pick random -100 100)
+        repeat until touching "Player"
+          turn right 5
+          wait 0.05
+        change score by 1
+        start sound "Pop"
+        delete this clone

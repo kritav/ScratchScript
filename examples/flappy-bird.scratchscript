@@ -1,0 +1,65 @@
+project
+  variable score = 0
+  variable gravity = -2
+  variable gameRunning = 0
+  backdrops "Blue Sky"
+
+  sprite Bird
+    costumes "cat-a", "cat-b"
+    position -100, 0
+    size 50
+
+    variable velocity = 0
+
+    script
+      when flag clicked
+        set score to 0
+        set velocity to 0
+        set gameRunning to 1
+        go to x y -100 0
+        show
+        show variable score
+        forever
+          change velocity by gravity
+          change y by velocity
+          if y position < -170
+            set gameRunning to 0
+            say "Game Over!" 2
+            stop all
+          if y position > 170
+            set y to 170
+            set velocity to 0
+          switch costume to "cat-a"
+          wait 0.05
+
+    script
+      when key space pressed
+        if gameRunning = 1
+          set velocity to 10
+
+  sprite Pipe
+    costumes "ball-a"
+    position 240, 0
+    size 100
+    visible false
+
+    script
+      when flag clicked
+        hide
+        forever
+          create clone of "myself"
+          wait 2
+
+    script
+      when I start as a clone
+        show
+        go to x y 240 (pick random -100 100)
+        repeat 120
+          change x by -4
+          if touching "Bird"
+            set gameRunning to 0
+            say "Ouch!"
+            stop all
+        if x position < -240
+          change score by 1
+        delete this clone
