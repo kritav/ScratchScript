@@ -98,12 +98,12 @@ body {
 .msg-download a {
     font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--text-secondary);
+    color: var(--accent);
     text-decoration: none;
     cursor: pointer;
-    transition: color 100ms ease-out;
+    transition: opacity 100ms ease-out;
 }
-.msg-download a:hover { color: var(--accent); }
+.msg-download a:hover { opacity: 0.8; }
 .msg-actions { margin-top: 4px; }
 .msg-actions a {
     font-family: var(--font-mono);
