@@ -938,7 +938,10 @@ def _run_generate(state: _State, prompt: str):
                     },
                 )
     except Exception as e:
-        state.emit("status", {"step": "error", "message": str(e)})
+        import traceback
+        traceback.print_exc()
+        msg = str(e) or repr(e)
+        state.emit("status", {"step": "error", "message": f"{type(e).__name__}: {msg}"})
     finally:
         state.generating = False
         state.emit("generating_done", {})
