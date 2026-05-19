@@ -6,12 +6,93 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from .compiler.opcodes import OPCODES, BINARY_OPS, UNARY_OPS
 from .providers.base import Provider
 
-REVIEWER_SYSTEM_PROMPT = """\
+
+def _build_block_reference() -> str:
+    """Generate a compact block reference from the opcode table."""
+    categories: dict[str, list[str]] = {}
+    for name, entry in OPCODES.items():
+        # Derive category from opcode prefix
+        if entry.is_hat:
+            cat = "Events"
+        else:
+            prefix = entry.opcode.split("_")[0]
+            cat_map = {
+                "event": "Events",
+                "motion": "Motion",
+                "looks": "Looks",
+                "sound": "Sound",
+                "control": "Control",
+                "sensing": "Sensing",
+                "operator": "Operators",
+                "data": "Data",
+                "pen": "Pen",
+                "music": "Music",
+            }
+            cat = cat_map.get(prefix, "Other")
+        if cat not in categories:
+            categories[cat] = []
+
+        # Build argument description
+        parts: list[str] = []
+        for inp in entry.inputs:
+            parts.append(f"<{inp.name}:{inp.type}>")
+        for fld in entry.fields:
+            if fld.values:
+                parts.append(f"[{fld.name}: {' | '.join(fld.values)}]")
+
+        # Tag type
+        tags = []
+        if entry.is_hat:
+            tags.append("hat")
+        if entry.is_reporter:
+            tags.append("reporter")
+        if entry.is_boolean:
+            tags.append("boolean")
+        if entry.is_terminal:
+            tags.append("terminal")
+
+        line = f"  {name}"
+        if parts:
+            line += " " + " ".join(parts)
+        if tags:
+            line += f"  ({', '.join(tags)})"
+        categories[cat].append(line)
+
+    # Add binary/unary operators
+    ops = "  Binary: " + " ".join(BINARY_OPS.keys())
+    ops += "\n  Unary: " + " ".join(UNARY_OPS.keys())
+    if "Operators" not in categories:
+        categories["Operators"] = []
+    categories["Operators"].append(ops)
+
+    # Build output
+    lines = []
+    order = [
+        "Events", "Motion", "Looks", "Sound", "Control",
+        "Sensing", "Operators", "Data", "Pen", "Music",
+    ]
+    for cat in order:
+        if cat in categories:
+            lines.append(f"[{cat}]")
+            lines.extend(categories[cat])
+    return "\n".join(lines)
+
+
+_BLOCK_REFERENCE = _build_block_reference()
+
+REVIEWER_SYSTEM_PROMPT = f"""\
 You are a Scratch project reviewer. You receive ScratchScript code (a DSL that compiles to Scratch .sb3 files) and the original user request. Your job is to critique the code for design quality, logical correctness, and Scratch-specific best practices — not syntax. The compiler handles syntax. You handle everything else.
 
 You are an expert Scratch developer who has built hundreds of projects. You think like a skilled human Scratch user, not like a software engineer. Scratch projects should be simple, direct, and take advantage of how Scratch actually works — not mirror patterns from professional programming languages.
+
+IMPORTANT: Before flagging any block name, argument, or value as invalid, check it against the block reference below. If it appears in the reference, it is correct — do not flag it. Only flag blocks or arguments that are NOT in this reference.
+
+## Valid ScratchScript Block Reference
+
+{_BLOCK_REFERENCE}
 
 ## What You Check
 
