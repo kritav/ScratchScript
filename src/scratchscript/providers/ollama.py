@@ -35,7 +35,7 @@ class OllamaProvider(Provider):
             pass
         return "llama3.1"
 
-    async def _check_server(self):
+    async def check_server(self):
         """Verify Ollama is reachable before starting a long request."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -59,7 +59,7 @@ class OllamaProvider(Provider):
         *,
         on_token: Optional[Callable[[str], None]] = None,
     ) -> str:
-        await self._check_server()
+        await self.check_server()
 
         payload = {
             "model": self.model,

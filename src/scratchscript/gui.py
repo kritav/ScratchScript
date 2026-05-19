@@ -375,7 +375,15 @@ evtSource.addEventListener('stream', function(e) {
     }
     renderStreamContent(streamBuffer);
 });
-evtSource.addEventListener('generating_done', function(e) { generating = false; });
+evtSource.addEventListener('generating_done', function(e) {
+    generating = false;
+    codeStream.classList.remove('visible');
+    if (currentCode) {
+        codeDisplay.classList.add('visible');
+    } else if (!editMode) {
+        codeEmpty.style.display = 'block';
+    }
+});
 
 /* -- Event handlers -- */
 function onStatus(data) {
@@ -975,6 +983,22 @@ def _run_generate(state: _State, prompt: str):
             pass
 
         # --- Step 1: Generate ---
+        # Pre-flight check for Ollama so we fail fast instead of hanging
+        try:
+            from .providers.ollama import OllamaProvider
+
+            if isinstance(state.provider, OllamaProvider):
+                asyncio.run(state.provider.check_server())
+        except (ImportError, ConnectionError) as e:
+            if isinstance(e, ConnectionError):
+                state.emit(
+                    "status",
+                    {"step": "error", "message": str(e)},
+                )
+                return
+        except Exception:
+            pass  # Non-Ollama providers skip this
+
         state.emit(
             "status",
             {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
