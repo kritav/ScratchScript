@@ -70,7 +70,8 @@ class OllamaProvider(Provider):
             "stream": on_token is not None,
         }
 
-        async with httpx.AsyncClient(timeout=600.0) as client:
+        timeout = httpx.Timeout(600.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             if on_token is None:
                 resp = await client.post(
                     f"{self.base_url}/api/chat", json=payload

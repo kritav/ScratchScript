@@ -337,6 +337,8 @@ var currentCode = '';
 var streamBuffer = '';
 var lastPrompt = '';
 var currentStatusGroup = null;
+var streamTimer = null;
+var streamStartTime = 0;
 
 /* -- Element references -- */
 var chat = document.getElementById('chat');
@@ -357,26 +359,33 @@ var editLink = document.getElementById('edit-link');
 var evtSource = new EventSource('/api/events');
 evtSource.addEventListener('status', function(e) { onStatus(JSON.parse(e.data)); });
 evtSource.addEventListener('code', function(e) { onCode(JSON.parse(e.data)); });
+evtSource.addEventListener('provider', function(e) { onProvider(JSON.parse(e.data)); });
 evtSource.addEventListener('download', function(e) { onDownload(JSON.parse(e.data)); });
 evtSource.addEventListener('compile_result', function(e) { onCompileResult(JSON.parse(e.data)); });
 evtSource.addEventListener('stream_start', function(e) {
-    console.log('[sse] stream_start');
     streamBuffer = '';
+    streamStartTime = Date.now();
     codeEmpty.style.display = 'none';
     codeDisplay.classList.remove('visible');
     codeStream.classList.add('visible');
-    codeStream.innerHTML = '<span class="stream-waiting">Waiting for model response\u2026</span>';
+    codeStream.innerHTML = '<span class="stream-waiting">Waiting for model response\u2026 (0s)</span>';
+    if (streamTimer) clearInterval(streamTimer);
+    streamTimer = setInterval(function() {
+        if (!codeStream.classList.contains('visible')) { clearInterval(streamTimer); streamTimer = null; return; }
+        if (streamBuffer) { clearInterval(streamTimer); streamTimer = null; return; }
+        var elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
+        codeStream.innerHTML = '<span class="stream-waiting">Waiting for model response\u2026 (' + elapsed + 's)</span>';
+    }, 1000);
 });
 evtSource.addEventListener('stream', function(e) {
     var data = JSON.parse(e.data);
     streamBuffer += data.token;
-    if (streamBuffer.length <= data.token.length) {
-        console.log('[sse] first stream token:', data.token.substring(0, 40));
-    }
+    if (streamTimer) { clearInterval(streamTimer); streamTimer = null; }
     renderStreamContent(streamBuffer);
 });
 evtSource.addEventListener('generating_done', function(e) {
     generating = false;
+    if (streamTimer) { clearInterval(streamTimer); streamTimer = null; }
     codeStream.classList.remove('visible');
     if (currentCode) {
         codeDisplay.classList.add('visible');
@@ -946,13 +955,18 @@ def _run_generate(state: _State, prompt: str):
     if state.generating:
         return
     if not state.provider:
+        # Try to detect a provider now (e.g. Ollama started after GUI launch)
+        _detect_provider(state)
+        if state.provider:
+            state.emit("provider", state.provider_info())
+    if not state.provider:
         state.emit(
             "status",
             {
                 "step": "error",
                 "message": (
                     "No LLM provider available. "
-                    "Write ScratchScript in the editor and compile it directly."
+                    "Start Ollama (ollama serve) or set an API key, then try again."
                 ),
             },
         )
@@ -1018,15 +1032,20 @@ def _run_generate(state: _State, prompt: str):
 
         # --- Step 2: Review loop ---
         reviewer = Reviewer(state.provider)
+        review_token_cb = gen_kwargs.get("on_token")
         for cycle in range(max_review_cycles):
             if state.cancel.is_set():
                 state.emit("status", {"step": "error", "message": "Cancelled"})
                 return
 
             state.emit("status", {"step": "reviewing", "cycle": cycle + 1})
+            if review_token_cb:
+                state.emit("stream_start", {})
             try:
                 review_result = asyncio.run(
-                    reviewer.review(prompt, scratchscript)
+                    reviewer.review(
+                        prompt, scratchscript, on_token=review_token_cb
+                    )
                 )
             except Exception as e:
                 state.emit(
@@ -1034,6 +1053,9 @@ def _run_generate(state: _State, prompt: str):
                     {"step": "review_error", "message": str(e)},
                 )
                 break
+
+            # Review done — restore code display (hides stream panel)
+            state.emit("code", {"text": scratchscript})
 
             if review_result.verdict == "PASS":
                 state.emit("status", {"step": "review_passed"})
