@@ -1,12 +1,15 @@
-"""PyWebView-based GUI for ScratchScript."""
+"""Flask-based GUI for ScratchScript — serves on localhost, opens in browser."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import shutil
+import queue
+import socket
 import tempfile
 import threading
+import time
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -49,7 +52,7 @@ body {
     width: 100vw;
 }
 
-/* ── Chat Panel ── */
+/* -- Chat Panel -- */
 #chat {
     flex: 0 0 55%;
     display: flex;
@@ -113,7 +116,7 @@ body {
 }
 .msg-actions a:hover { color: var(--accent); }
 
-/* ── Input Area ── */
+/* -- Input Area -- */
 #input-area {
     border-top: 1px solid var(--border);
     padding: 12px 16px;
@@ -136,7 +139,7 @@ body {
 #prompt-input::placeholder { color: var(--text-disabled); }
 #prompt-input:focus { border-color: rgba(255, 255, 255, 0.15); }
 
-/* ── Divider ── */
+/* -- Divider -- */
 #divider {
     flex: 0 0 4px;
     background: transparent;
@@ -145,7 +148,7 @@ body {
 }
 #divider:hover, #divider.dragging { background: rgba(74, 158, 255, 0.3); }
 
-/* ── Preview Panel ── */
+/* -- Preview Panel -- */
 #preview {
     flex: 0 0 calc(45% - 4px);
     display: flex;
@@ -238,7 +241,7 @@ body {
 }
 #code-editor.visible { display: block; }
 
-/* ── Status Bar ── */
+/* -- Status Bar -- */
 #status-bar {
     padding: 4px 12px;
     font-family: var(--font-mono);
@@ -251,13 +254,13 @@ body {
     text-overflow: ellipsis;
 }
 
-/* ── Scrollbar ── */
+/* -- Scrollbar -- */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 
-/* ── Syntax highlighting ── */
+/* -- Syntax highlighting -- */
 .syn-kw { color: var(--keyword); }
 .syn-str { color: var(--string); }
 .syn-num { color: var(--number); }
@@ -287,7 +290,7 @@ body {
     </div>
 </div>
 <script>
-/* ── Constants ── */
+/* -- Constants -- */
 var KEYWORDS = new Set([
     'project','sprite','stage','script','when','if','else','end',
     'forever','repeat','until','define','variable','list','broadcast',
@@ -302,14 +305,14 @@ var KEYWORDS = new Set([
     'erase','clear'
 ]);
 
-/* ── State ── */
+/* -- State -- */
 var generating = false;
 var editMode = false;
 var currentCode = '';
 var lastPrompt = '';
 var currentStatusGroup = null;
 
-/* ── Element references ── */
+/* -- Element references -- */
 var chat = document.getElementById('chat');
 var messages = document.getElementById('messages');
 var promptInput = document.getElementById('prompt-input');
@@ -323,19 +326,15 @@ var statusBar = document.getElementById('status-bar');
 var compileBtn = document.getElementById('compile-btn');
 var editLink = document.getElementById('edit-link');
 
-/* ── Event dispatcher (called from Python) ── */
-window.handleEvent = function(event, data) {
-    switch (event) {
-        case 'status': onStatus(data); break;
-        case 'code': onCode(data); break;
-        case 'download': onDownload(data); break;
-        case 'provider': onProvider(data); break;
-        case 'compile_result': onCompileResult(data); break;
-        case 'generating_done': generating = false; break;
-    }
-};
+/* -- Server-Sent Events -- */
+var evtSource = new EventSource('/api/events');
+evtSource.addEventListener('status', function(e) { onStatus(JSON.parse(e.data)); });
+evtSource.addEventListener('code', function(e) { onCode(JSON.parse(e.data)); });
+evtSource.addEventListener('download', function(e) { onDownload(JSON.parse(e.data)); });
+evtSource.addEventListener('compile_result', function(e) { onCompileResult(JSON.parse(e.data)); });
+evtSource.addEventListener('generating_done', function(e) { generating = false; });
 
-/* ── Event handlers ── */
+/* -- Event handlers -- */
 function onStatus(data) {
     var icon, cls, text;
     switch (data.step) {
@@ -396,11 +395,8 @@ function onDownload(data) {
     div.className = 'msg msg-download';
     var a = document.createElement('a');
     a.textContent = '\u2193 ' + filename + sizeText;
-    a.href = '#';
-    a.onclick = function(e) {
-        e.preventDefault();
-        pywebview.api.save_file();
-    };
+    a.href = '/api/download';
+    a.download = filename;
     div.appendChild(a);
     messages.appendChild(div);
     scrollChat();
@@ -424,7 +420,7 @@ function onCompileResult(data) {
     }
 }
 
-/* ── Message rendering ── */
+/* -- Message rendering -- */
 function addUserMessage(text) {
     var div = document.createElement('div');
     div.className = 'msg msg-user';
@@ -471,7 +467,11 @@ function addFailureActions() {
             generating = true;
             addUserMessage(lastPrompt);
             startStatusGroup();
-            pywebview.api.generate(lastPrompt);
+            fetch('/api/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prompt: lastPrompt})
+            });
         }
     };
     var editBtn = document.createElement('a');
@@ -487,7 +487,7 @@ function addFailureActions() {
     scrollChat();
 }
 
-/* ── Code rendering ── */
+/* -- Code rendering -- */
 function renderCode(text) {
     if (!text) {
         codeEmpty.style.display = 'block';
@@ -562,7 +562,7 @@ function highlightLine(line) {
     return result;
 }
 
-/* ── Edit mode ── */
+/* -- Edit mode -- */
 function enterEditMode() {
     editMode = true;
     codeEmpty.style.display = 'none';
@@ -590,7 +590,11 @@ compileBtn.addEventListener('click', function() {
     currentCode = code;
     startStatusGroup();
     addStatusLine('\u25cf', 'status-progress', 'Compiling...');
-    pywebview.api.compile_text(code);
+    fetch('/api/compile', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code: code})
+    });
 });
 
 /* Tab key in editor inserts 2 spaces */
@@ -604,7 +608,7 @@ codeEditor.addEventListener('keydown', function(e) {
     }
 });
 
-/* ── Input handling ── */
+/* -- Input handling -- */
 promptInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -626,10 +630,14 @@ function submitPrompt() {
     startStatusGroup();
     promptInput.value = '';
     promptInput.style.height = 'auto';
-    pywebview.api.generate(text);
+    fetch('/api/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt: text})
+    });
 }
 
-/* ── Divider drag ── */
+/* -- Divider drag -- */
 var dragging = false;
 
 divider.addEventListener('mousedown', function(e) {
@@ -656,22 +664,27 @@ document.addEventListener('mouseup', function() {
     }
 });
 
-/* ── Keyboard shortcuts ── */
+/* -- Keyboard shortcuts -- */
 document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        pywebview.api.save_file();
+        var a = document.createElement('a');
+        a.href = '/api/download';
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
         e.preventDefault();
         if (currentCode) navigator.clipboard.writeText(currentCode);
     }
     if (e.key === 'Escape' && generating) {
-        pywebview.api.cancel();
+        fetch('/api/cancel', {method: 'POST'});
     }
 });
 
-/* ── Utilities ── */
+/* -- Utilities -- */
 function escapeHtml(text) {
     if (!text) return '';
     return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -687,295 +700,372 @@ function scrollChat() {
     messages.scrollTop = messages.scrollHeight;
 }
 
-/* ── Init ── */
-window.addEventListener('pywebviewready', function() {
-    pywebview.api.init_provider();
-});
+/* -- Init -- */
+fetch('/api/provider').then(function(r) { return r.json(); }).then(onProvider);
 </script>
 </body>
 </html>
 """
 
 
-class Api:
-    """Python-to-JavaScript bridge for the ScratchScript GUI."""
+# ---------------------------------------------------------------------------
+# Shared state
+# ---------------------------------------------------------------------------
+
+class _State:
+    """Mutable state shared between Flask routes and background threads."""
 
     def __init__(self):
-        self._window = None
-        self._provider = None
-        self._provider_name = ""
-        self._model_name = ""
-        self._sb3_path: Optional[str] = None
-        self._sb3_filename: str = "project.sb3"
-        self._generating = False
-        self._cancel = threading.Event()
+        self.provider = None
+        self.provider_name: str = ""
+        self.model_name: str = ""
+        self.sb3_path: Optional[str] = None
+        self.sb3_filename: str = "project.sb3"
+        self.generating: bool = False
+        self.cancel = threading.Event()
+        self._queues: list[queue.Queue] = []
+        self._lock = threading.Lock()
 
-    def set_window(self, window):
-        self._window = window
+    def emit(self, event: str, data: dict):
+        """Push an SSE event to every connected client."""
+        msg = f"event: {event}\ndata: {json.dumps(data)}\n\n"
+        with self._lock:
+            for q in list(self._queues):
+                try:
+                    q.put_nowait(msg)
+                except queue.Full:
+                    pass
 
-    def _emit(self, event: str, data: dict):
-        """Push an event to the frontend."""
-        js = f"window.handleEvent({json.dumps(event)}, {json.dumps(data)})"
-        if self._window:
-            self._window.evaluate_js(js)
+    def subscribe(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue(maxsize=256)
+        with self._lock:
+            self._queues.append(q)
+        return q
 
-    # ── Public API (called from JS) ──
+    def unsubscribe(self, q: queue.Queue):
+        with self._lock:
+            if q in self._queues:
+                self._queues.remove(q)
 
-    def init_provider(self):
-        """Detect an LLM provider on startup."""
-        try:
-            from .providers import detect_provider
+    def provider_info(self) -> dict:
+        if self.provider:
+            return {
+                "available": True,
+                "name": self.provider_name,
+                "model": self.model_name,
+            }
+        return {"available": False}
 
-            provider = asyncio.run(detect_provider())
-            self._provider = provider
-            self._provider_name = type(provider).__name__.replace("Provider", "").lower()
-            self._model_name = getattr(provider, "model", "default")
-            self._emit(
-                "provider",
-                {
-                    "available": True,
-                    "name": self._provider_name,
-                    "model": self._model_name,
-                },
-            )
-        except Exception:
-            self._provider = None
-            self._emit("provider", {"available": False})
 
-    def generate(self, prompt: str):
-        """Full pipeline: LLM generate -> compile -> retry -> bundle."""
-        if self._generating:
+# ---------------------------------------------------------------------------
+# Pipeline helpers (run in background threads, push results via SSE)
+# ---------------------------------------------------------------------------
+
+def _detect_provider(state: _State):
+    try:
+        from .providers import detect_provider
+
+        provider = asyncio.run(detect_provider())
+        state.provider = provider
+        state.provider_name = (
+            type(provider).__name__.replace("Provider", "").lower()
+        )
+        state.model_name = getattr(provider, "model", "default")
+    except Exception:
+        state.provider = None
+
+
+def _try_compile(source: str) -> Optional[dict]:
+    from .compiler.codegen import generate
+    from .compiler.parser import ParseError, parse
+    from .compiler.validator import validate
+
+    try:
+        project = parse(source)
+    except ParseError:
+        return None
+    validate(project)
+    try:
+        return generate(project)
+    except Exception:
+        return None
+
+
+def _get_compile_errors(source: str) -> str:
+    from .compiler.parser import ParseError, parse
+    from .compiler.validator import validate
+
+    errors: list[str] = []
+    try:
+        project = parse(source)
+        result = validate(project)
+        if not result.is_valid:
+            errors.append(result.format_errors())
+    except ParseError as e:
+        errors.append(str(e))
+    except Exception as e:
+        errors.append(str(e))
+    return "\n".join(errors) if errors else "Unknown compilation error"
+
+
+def _bundle_result(state: _State, project_json: dict, name: str):
+    words = name.lower().split()[:4]
+    fname = "-".join(w for w in words if w.isalnum())
+    if not fname:
+        fname = "project"
+    state.sb3_filename = f"{fname}.sb3"
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".sb3", delete=False)
+    tmp.close()
+    state.sb3_path = tmp.name
+
+    try:
+        from .compiler.bundler import bundle
+
+        asyncio.run(bundle(project_json, state.sb3_path))
+    except Exception:
+        from .compiler.bundler import bundle_sync
+
+        bundle_sync(project_json, state.sb3_path)
+
+    size = Path(state.sb3_path).stat().st_size
+    state.emit("status", {"step": "done", "detail": state.sb3_filename})
+    state.emit("download", {"filename": state.sb3_filename, "size": size})
+
+
+def _run_generate(state: _State, prompt: str):
+    if state.generating:
+        return
+    if not state.provider:
+        state.emit(
+            "status",
+            {
+                "step": "error",
+                "message": (
+                    "No LLM provider available. "
+                    "Write ScratchScript in the editor and compile it directly."
+                ),
+            },
+        )
+        state.emit("generating_done", {})
+        return
+
+    state.generating = True
+    state.cancel.clear()
+    max_retries = 3
+
+    try:
+        from .prompts import get_system_prompt
+
+        system_prompt = get_system_prompt()
+
+        state.emit(
+            "status",
+            {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
+        )
+        scratchscript = asyncio.run(
+            state.provider.generate(prompt, system_prompt)
+        )
+
+        if state.cancel.is_set():
+            state.emit("status", {"step": "error", "message": "Cancelled"})
             return
-        if not self._provider:
-            self._emit(
-                "status",
-                {
-                    "step": "error",
-                    "message": (
-                        "No LLM provider available. "
-                        "Write ScratchScript in the editor and compile it directly."
-                    ),
-                },
-            )
-            self._emit("generating_done", {})
-            return
 
-        self._generating = True
-        self._cancel.clear()
-        max_retries = 3
+        state.emit("status", {"step": "generated", "chars": len(scratchscript)})
+        state.emit("code", {"text": scratchscript})
 
-        try:
-            from .prompts import get_system_prompt
-
-            system_prompt = get_system_prompt()
-
-            # Generate
-            self._emit(
-                "status",
-                {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
-            )
-            scratchscript = asyncio.run(
-                self._provider.generate(prompt, system_prompt)
-            )
-
-            if self._cancel.is_set():
-                self._emit("status", {"step": "error", "message": "Cancelled"})
+        for attempt in range(max_retries + 1):
+            if state.cancel.is_set():
+                state.emit("status", {"step": "error", "message": "Cancelled"})
                 return
 
-            self._emit("status", {"step": "generated", "chars": len(scratchscript)})
-            self._emit("code", {"text": scratchscript})
+            state.emit("status", {"step": "compiling"})
+            result = _try_compile(scratchscript)
 
-            # Compile with retry loop
-            for attempt in range(max_retries + 1):
-                if self._cancel.is_set():
-                    self._emit("status", {"step": "error", "message": "Cancelled"})
-                    return
+            if result is not None:
+                state.emit("status", {"step": "bundling"})
+                _bundle_result(state, result, prompt)
+                return
 
-                self._emit("status", {"step": "compiling"})
-                result = self._try_compile(scratchscript)
+            error_text = _get_compile_errors(scratchscript)
 
-                if result is not None:
-                    self._emit("status", {"step": "bundling"})
-                    self._bundle_result(result, prompt)
-                    return
-
-                # Compilation failed
-                error_text = self._get_compile_errors(scratchscript)
-
-                if attempt < max_retries:
-                    self._emit(
-                        "status",
-                        {
-                            "step": "fix_error",
-                            "message": f"Compile error: {error_text[:200]}",
-                        },
+            if attempt < max_retries:
+                state.emit(
+                    "status",
+                    {
+                        "step": "fix_error",
+                        "message": f"Compile error: {error_text[:200]}",
+                    },
+                )
+                state.emit(
+                    "status",
+                    {
+                        "step": "retrying",
+                        "attempt": attempt + 2,
+                        "max_attempts": max_retries + 1,
+                    },
+                )
+                try:
+                    scratchscript = asyncio.run(
+                        state.provider.fix(scratchscript, error_text, system_prompt)
                     )
-                    self._emit(
+                    if state.cancel.is_set():
+                        state.emit(
+                            "status", {"step": "error", "message": "Cancelled"}
+                        )
+                        return
+                    state.emit(
                         "status",
-                        {
-                            "step": "retrying",
-                            "attempt": attempt + 2,
-                            "max_attempts": max_retries + 1,
-                        },
+                        {"step": "generated", "chars": len(scratchscript)},
                     )
-
-                    try:
-                        scratchscript = asyncio.run(
-                            self._provider.fix(
-                                scratchscript, error_text, system_prompt
-                            )
-                        )
-                        if self._cancel.is_set():
-                            self._emit(
-                                "status", {"step": "error", "message": "Cancelled"}
-                            )
-                            return
-                        self._emit(
-                            "status",
-                            {"step": "generated", "chars": len(scratchscript)},
-                        )
-                        self._emit("code", {"text": scratchscript})
-                    except Exception as e:
-                        self._emit(
-                            "status",
-                            {"step": "error", "message": f"Fix attempt failed: {e}"},
-                        )
-                        break
-                else:
-                    self._emit(
+                    state.emit("code", {"text": scratchscript})
+                except Exception as e:
+                    state.emit(
                         "status",
-                        {
-                            "step": "failed",
-                            "message": (
-                                f"Failed after {max_retries + 1} attempts: "
-                                f"{error_text[:200]}"
-                            ),
-                        },
+                        {"step": "error", "message": f"Fix attempt failed: {e}"},
                     )
-        except Exception as e:
-            self._emit("status", {"step": "error", "message": str(e)})
-        finally:
-            self._generating = False
-            self._emit("generating_done", {})
+                    break
+            else:
+                state.emit(
+                    "status",
+                    {
+                        "step": "failed",
+                        "message": (
+                            f"Failed after {max_retries + 1} attempts: "
+                            f"{error_text[:200]}"
+                        ),
+                    },
+                )
+    except Exception as e:
+        state.emit("status", {"step": "error", "message": str(e)})
+    finally:
+        state.generating = False
+        state.emit("generating_done", {})
 
-    def compile_text(self, scratchscript: str):
-        """Compile user-edited ScratchScript text."""
-        result = self._try_compile(scratchscript)
-        if result is not None:
-            self._bundle_result(result, "project")
-            self._emit("compile_result", {"success": True})
-        else:
-            error_text = self._get_compile_errors(scratchscript)
-            self._emit("compile_result", {"success": False, "error": error_text})
 
-    def save_file(self):
-        """Open a native save dialog for the compiled .sb3."""
-        if not self._sb3_path or not Path(self._sb3_path).exists():
-            return
-        try:
-            import webview
+def _run_compile(state: _State, scratchscript: str):
+    result = _try_compile(scratchscript)
+    if result is not None:
+        _bundle_result(state, result, "project")
+        state.emit("compile_result", {"success": True})
+    else:
+        error_text = _get_compile_errors(scratchscript)
+        state.emit("compile_result", {"success": False, "error": error_text})
 
-            result = self._window.create_file_dialog(
-                webview.SAVE_DIALOG,
-                save_filename=self._sb3_filename,
-                file_types=("Scratch Project (*.sb3)",),
-            )
-            if result:
-                dest = result[0] if isinstance(result, (list, tuple)) else result
-                shutil.copy2(self._sb3_path, dest)
-        except Exception:
-            pass
 
-    def cancel(self):
-        """Cancel the current generation."""
-        self._cancel.set()
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
-    # ── Internal helpers ──
 
-    def _try_compile(self, source: str) -> Optional[dict]:
-        """Parse + validate + codegen. Returns project.json dict or None."""
-        from .compiler.codegen import generate
-        from .compiler.parser import ParseError, parse
-        from .compiler.validator import validate
-
-        try:
-            project = parse(source)
-        except ParseError:
-            return None
-
-        validate(project)  # non-fatal — continue anyway
-
-        try:
-            return generate(project)
-        except Exception:
-            return None
-
-    def _get_compile_errors(self, source: str) -> str:
-        """Collect error messages from a failed compilation."""
-        from .compiler.parser import ParseError, parse
-        from .compiler.validator import validate
-
-        errors: list[str] = []
-        try:
-            project = parse(source)
-            result = validate(project)
-            if not result.is_valid:
-                errors.append(result.format_errors())
-        except ParseError as e:
-            errors.append(str(e))
-        except Exception as e:
-            errors.append(str(e))
-
-        return "\n".join(errors) if errors else "Unknown compilation error"
-
-    def _bundle_result(self, project_json: dict, name: str):
-        """Bundle a compiled project to a temp .sb3 and emit the download event."""
-        words = name.lower().split()[:4]
-        fname = "-".join(w for w in words if w.isalnum())
-        if not fname:
-            fname = "project"
-        self._sb3_filename = f"{fname}.sb3"
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".sb3", delete=False)
-        tmp.close()
-        self._sb3_path = tmp.name
-
-        try:
-            from .compiler.bundler import bundle
-
-            asyncio.run(bundle(project_json, self._sb3_path))
-        except Exception:
-            from .compiler.bundler import bundle_sync
-
-            bundle_sync(project_json, self._sb3_path)
-
-        size = Path(self._sb3_path).stat().st_size
-        self._emit("status", {"step": "done", "detail": self._sb3_filename})
-        self._emit("download", {"filename": self._sb3_filename, "size": size})
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    """Launch the ScratchScript GUI."""
+    """Launch the ScratchScript GUI (Flask server + browser)."""
     try:
-        import webview
+        from flask import Flask, Response, jsonify, request, send_file
     except ImportError:
-        print("pywebview is required for the GUI. Install with:")
+        print("Flask is required for the GUI. Install with:")
         print("  pip install scratchscript[gui]")
         raise SystemExit(1)
 
-    api = Api()
-    window = webview.create_window(
-        title="ScratchScript",
-        html=_HTML,
-        js_api=api,
-        width=1100,
-        height=700,
-        min_size=(800, 500),
-        resizable=True,
-        background_color="#1a1a1e",
-    )
-    api.set_window(window)
-    webview.start()
+    import logging
+
+    state = _State()
+    _detect_provider(state)
+
+    app = Flask(__name__)
+
+    # Quiet request logging
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+    # ── Routes ──
+
+    @app.route("/")
+    def index():
+        return _HTML
+
+    @app.route("/api/provider")
+    def api_provider():
+        return jsonify(state.provider_info())
+
+    @app.route("/api/generate", methods=["POST"])
+    def api_generate():
+        data = request.get_json(force=True)
+        prompt = data.get("prompt", "")
+        if not prompt:
+            return jsonify({"error": "No prompt provided"}), 400
+        threading.Thread(
+            target=_run_generate, args=(state, prompt), daemon=True
+        ).start()
+        return jsonify({"ok": True})
+
+    @app.route("/api/compile", methods=["POST"])
+    def api_compile():
+        data = request.get_json(force=True)
+        code = data.get("code", "")
+        if not code:
+            return jsonify({"error": "No code provided"}), 400
+        threading.Thread(
+            target=_run_compile, args=(state, code), daemon=True
+        ).start()
+        return jsonify({"ok": True})
+
+    @app.route("/api/download")
+    def api_download():
+        if state.sb3_path and Path(state.sb3_path).exists():
+            return send_file(
+                state.sb3_path,
+                as_attachment=True,
+                download_name=state.sb3_filename,
+            )
+        return "", 404
+
+    @app.route("/api/cancel", methods=["POST"])
+    def api_cancel():
+        state.cancel.set()
+        return jsonify({"ok": True})
+
+    @app.route("/api/events")
+    def api_events():
+        def stream():
+            q = state.subscribe()
+            try:
+                while True:
+                    try:
+                        msg = q.get(timeout=30)
+                        yield msg
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+            except GeneratorExit:
+                pass
+            finally:
+                state.unsubscribe(q)
+
+        return Response(
+            stream(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    # ── Start ──
+
+    port = _find_free_port()
+    print(f"ScratchScript running at http://localhost:{port}")
+
+    def _open_browser():
+        time.sleep(0.8)
+        webbrowser.open(f"http://localhost:{port}")
+
+    threading.Thread(target=_open_browser, daemon=True).start()
+    app.run(host="127.0.0.1", port=port, threaded=True)
 
 
 if __name__ == "__main__":
