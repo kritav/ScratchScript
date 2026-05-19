@@ -192,6 +192,37 @@ class Reviewer:
         return ReviewResult(verdict=verdict, issues=issues)
 
 
+_REVISION_FORMAT_EXAMPLE = """\
+ScratchScript uses INDENTATION to show nesting. No curly braces. No semicolons.
+Two-space indent per level. Example of correct format:
+
+project "My Game"
+  variable score = 0
+
+  stage
+    backdrops "Blue Sky"
+
+  sprite Cat
+    costumes "cat-a"
+    position 0 0
+    script
+      when green flag clicked
+      set score to 0
+      forever
+        go to x y (mouse x) (mouse y)
+        if touching "Dog" then
+          change score by 1
+          play sound "Meow"
+
+  sprite Dog
+    costumes "dog-a"
+    script
+      when green flag clicked
+      forever
+        point towards "Cat"
+        move 3 steps"""
+
+
 def build_revision_prompt(
     user_request: str, scratchscript: str, review: ReviewResult
 ) -> str:
@@ -200,6 +231,105 @@ def build_revision_prompt(
         f"The original request was: {user_request}\n\n"
         f"You generated this ScratchScript:\n{scratchscript}\n\n"
         f"{review.format_for_generator()}\n\n"
-        f"Generate a corrected version of the ScratchScript that fixes all the issues "
-        f"listed above. Output ONLY the corrected ScratchScript, nothing else."
+        f"Generate a corrected version that fixes all the issues above.\n\n"
+        f"{_REVISION_FORMAT_EXAMPLE}\n\n"
+        f"CRITICAL: Output ONLY valid ScratchScript code. No explanations, no markdown, "
+        f"no code fences, no braces. Your entire response must be valid ScratchScript "
+        f"starting with the project declaration."
     )
+
+
+# ScratchScript keywords that can appear at the start of a line
+_SS_LINE_STARTS = re.compile(
+    r"^\s*("
+    r"project|sprite|stage|script|when|if|else|end|forever|repeat|until|"
+    r"define|variable|list|broadcast|costumes?|sounds?|backdrops?|backdrop|"
+    r"position|size|direction|set|change|add|delete|insert|replace|"
+    r"show|hide|global|clone|stop|wait|move|turn|go|glide|point|"
+    r"say|think|switch|next|play|start|create|ask|pen|stamp|erase|clear"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _convert_braces_to_indentation(text: str) -> str:
+    """Convert brace-style ScratchScript to indentation-based syntax."""
+    lines = text.split("\n")
+    result: list[str] = []
+    depth = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append("")
+            continue
+        # Closing brace — decrease depth before emitting
+        if stripped == "}":
+            depth = max(0, depth - 1)
+            continue
+        # Line ends with opening brace — emit without the brace, then increase
+        if stripped.endswith("{"):
+            content = stripped[:-1].rstrip()
+            if content:
+                result.append("  " * depth + content)
+            depth += 1
+            continue
+        # Line has trailing brace somewhere (e.g. "sprite Cat {")
+        # Remove braces inline
+        cleaned = stripped.replace("{", "").replace("}", "").rstrip()
+        if cleaned:
+            result.append("  " * depth + cleaned)
+    return "\n".join(result)
+
+
+def extract_scratchscript(text: str) -> str:
+    """Extract ScratchScript code from LLM output that may contain prose.
+
+    Strips markdown fences, curly braces (converting to indentation),
+    leading/trailing explanations, and any non-code wrapping.
+    """
+    text = text.strip()
+
+    # Strip markdown code fences
+    if "```" in text:
+        blocks: list[str] = []
+        in_fence = False
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                if in_fence:
+                    in_fence = False
+                    continue
+                in_fence = True
+                continue
+            if in_fence:
+                blocks.append(line)
+        if blocks:
+            text = "\n".join(blocks).strip()
+
+    # Convert brace-style to indentation if braces are present
+    if "{" in text and "}" in text:
+        text = _convert_braces_to_indentation(text)
+
+    lines = text.split("\n")
+
+    # Find first line that looks like ScratchScript
+    first = 0
+    for i, line in enumerate(lines):
+        if _SS_LINE_STARTS.match(line):
+            first = i
+            break
+
+    # Find last line that looks like ScratchScript (or is indented content / blank)
+    last = first
+    for i in range(len(lines) - 1, first - 1, -1):
+        line = lines[i]
+        if _SS_LINE_STARTS.match(line) or line.strip() == "" or line.startswith((" ", "\t")):
+            if line.strip() or i == first:
+                last = i
+                break
+
+    # Trim trailing blank lines
+    while last > first and not lines[last].strip():
+        last -= 1
+
+    return "\n".join(lines[first : last + 1]).strip()

@@ -61,7 +61,7 @@ async def _generate(
     """Generate ScratchScript from a prompt and compile to .sb3."""
     from .prompts import get_system_prompt
     from .providers import detect_provider
-    from .reviewer import Reviewer, build_revision_prompt
+    from .reviewer import Reviewer, build_revision_prompt, extract_scratchscript
 
     # Detect provider
     try:
@@ -118,7 +118,8 @@ async def _generate(
             click.echo("Revising based on feedback...")
             revision_prompt = build_revision_prompt(prompt, scratchscript, result)
             try:
-                scratchscript = await provider.generate(revision_prompt, system_prompt)
+                raw = await provider.generate(revision_prompt, system_prompt)
+                scratchscript = extract_scratchscript(raw)
             except Exception as e:
                 click.echo(f"Revision failed: {e}", err=True)
                 break

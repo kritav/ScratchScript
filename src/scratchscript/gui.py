@@ -980,7 +980,7 @@ def _run_generate(state: _State, prompt: str):
 
     try:
         from .prompts import get_system_prompt
-        from .reviewer import Reviewer, build_revision_prompt
+        from .reviewer import Reviewer, build_revision_prompt, extract_scratchscript
 
         system_prompt = get_system_prompt()
 
@@ -1087,11 +1087,12 @@ def _run_generate(state: _State, prompt: str):
             try:
                 if gen_kwargs:
                     state.emit("stream_start", {})
-                scratchscript = asyncio.run(
+                raw = asyncio.run(
                     state.provider.generate(
                         revision_prompt, system_prompt, **gen_kwargs
                     )
                 )
+                scratchscript = extract_scratchscript(raw)
             except Exception as e:
                 state.emit(
                     "status",
