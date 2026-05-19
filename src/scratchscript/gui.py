@@ -235,6 +235,8 @@ body {
     overflow-y: auto;
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--bg-primary);
+    z-index: 1;
 }
 #code-stream.visible { display: block; }
 .stream-think { color: var(--text-disabled); font-style: italic; }
@@ -358,6 +360,7 @@ evtSource.addEventListener('code', function(e) { onCode(JSON.parse(e.data)); });
 evtSource.addEventListener('download', function(e) { onDownload(JSON.parse(e.data)); });
 evtSource.addEventListener('compile_result', function(e) { onCompileResult(JSON.parse(e.data)); });
 evtSource.addEventListener('stream_start', function(e) {
+    console.log('[sse] stream_start');
     streamBuffer = '';
     codeEmpty.style.display = 'none';
     codeDisplay.classList.remove('visible');
@@ -367,6 +370,9 @@ evtSource.addEventListener('stream_start', function(e) {
 evtSource.addEventListener('stream', function(e) {
     var data = JSON.parse(e.data);
     streamBuffer += data.token;
+    if (streamBuffer.length <= data.token.length) {
+        console.log('[sse] first stream token:', data.token.substring(0, 40));
+    }
     renderStreamContent(streamBuffer);
 });
 evtSource.addEventListener('generating_done', function(e) { generating = false; });
@@ -799,7 +805,7 @@ class _State:
                     pass
 
     def subscribe(self) -> queue.Queue:
-        q: queue.Queue = queue.Queue(maxsize=256)
+        q: queue.Queue = queue.Queue(maxsize=4096)
         with self._lock:
             self._queues.append(q)
         return q
