@@ -40,7 +40,7 @@ class OllamaProvider(Provider):
             "stream": False,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=600.0) as client:
             resp = await client.post(
                 f"{self.base_url}/api/generate", json=payload
             )
