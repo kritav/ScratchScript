@@ -44,24 +44,29 @@ class OllamaProvider(Provider):
     ) -> str:
         payload = {
             "model": self.model,
-            "prompt": system_prompt + "\n\n" + user_prompt,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             "stream": on_token is not None,
         }
 
         async with httpx.AsyncClient(timeout=600.0) as client:
             if on_token is None:
                 resp = await client.post(
-                    f"{self.base_url}/api/generate", json=payload
+                    f"{self.base_url}/api/chat", json=payload
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                return self._strip_code_fences(data.get("response", ""))
+                return self._strip_code_fences(
+                    data.get("message", {}).get("content", "")
+                )
 
             # Streaming mode — use aiter_bytes to avoid buffering issues
             print("[ollama] Streaming mode active")
             full_response: list[str] = []
             async with client.stream(
-                "POST", f"{self.base_url}/api/generate", json=payload
+                "POST", f"{self.base_url}/api/chat", json=payload
             ) as resp:
                 resp.raise_for_status()
                 token_count = 0
@@ -76,7 +81,7 @@ class OllamaProvider(Provider):
                             continue
                         try:
                             chunk = json.loads(line)
-                            token = chunk.get("response", "")
+                            token = chunk.get("message", {}).get("content", "")
                             if token:
                                 full_response.append(token)
                                 on_token(token)
@@ -89,7 +94,7 @@ class OllamaProvider(Provider):
                 if buf.strip():
                     try:
                         chunk = json.loads(buf.decode("utf-8", errors="replace"))
-                        token = chunk.get("response", "")
+                        token = chunk.get("message", {}).get("content", "")
                         if token:
                             full_response.append(token)
                             on_token(token)
