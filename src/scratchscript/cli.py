@@ -33,10 +33,11 @@ def main(ctx):
 @click.option("--model", "-m", type=str, default=None, help="Model name to use")
 @click.option("--output", "-o", type=str, default=None, help="Output .sb3 file path")
 @click.option("--retries", "-r", type=int, default=3, help="Max retry attempts on error")
+@click.option("--fast", "-f", is_flag=True, help="Skip reviewer (faster, less polished)")
 @click.option("--verbose", "-v", is_flag=True, help="Show verbose output")
-def generate(prompt, provider, model, output, retries, verbose):
+def generate(prompt, provider, model, output, retries, fast, verbose):
     """Generate a Scratch project from a natural language prompt."""
-    asyncio.run(_generate(prompt, provider, model, output, retries, verbose))
+    asyncio.run(_generate(prompt, provider, model, output, retries, fast, verbose))
 
 
 @main.command()
@@ -54,11 +55,13 @@ async def _generate(
     model: Optional[str],
     output: Optional[str],
     max_retries: int,
+    fast: bool,
     verbose: bool,
 ):
     """Generate ScratchScript from a prompt and compile to .sb3."""
     from .prompts import get_system_prompt
     from .providers import detect_provider
+    from .reviewer import Reviewer, build_revision_prompt
 
     # Detect provider
     try:
@@ -80,10 +83,51 @@ async def _generate(
         click.echo(f"Error generating code: {e}", err=True)
         sys.exit(1)
 
+    click.echo(f"Generated ({len(scratchscript)} chars)")
+
     if verbose:
         click.echo("\n--- Generated ScratchScript ---")
         click.echo(scratchscript)
         click.echo("--- End ---\n")
+
+    # Review loop (unless --fast)
+    if not fast:
+        reviewer = Reviewer(provider)
+        max_review_cycles = 2
+
+        for cycle in range(max_review_cycles):
+            click.echo(f"Reviewing... (cycle {cycle + 1}/{max_review_cycles})")
+            try:
+                result = await reviewer.review(prompt, scratchscript)
+            except Exception as e:
+                click.echo(f"Review failed: {e}", err=True)
+                break
+
+            if result.verdict == "PASS":
+                click.echo("Review passed")
+                break
+
+            click.echo(f"Reviewer found {result.summary()}")
+            for issue in result.issues:
+                click.echo(f"  [{issue.severity}] {issue.where}: {issue.problem}")
+            if verbose:
+                for issue in result.issues:
+                    if issue.fix:
+                        click.echo(f"    Fix: {issue.fix}")
+
+            click.echo("Revising based on feedback...")
+            revision_prompt = build_revision_prompt(prompt, scratchscript, result)
+            try:
+                scratchscript = await provider.generate(revision_prompt, system_prompt)
+            except Exception as e:
+                click.echo(f"Revision failed: {e}", err=True)
+                break
+
+            click.echo(f"Revised ({len(scratchscript)} chars)")
+            if verbose:
+                click.echo("\n--- Revised ScratchScript ---")
+                click.echo(scratchscript)
+                click.echo("--- End ---\n")
 
     # Compile with retry loop
     for attempt in range(max_retries + 1):
@@ -111,7 +155,6 @@ async def _generate(
 
         # Compilation failed
         if attempt < max_retries:
-            errors = result  # This is None, get errors differently
             error_text = _get_compile_errors(scratchscript)
             click.echo(f"Compilation failed (attempt {attempt + 1}/{max_retries + 1}), retrying...")
             if verbose:

@@ -389,6 +389,38 @@ function onStatus(data) {
             icon = '\u2713'; cls = 'status-success';
             text = 'Generated (' + (data.chars||'?') + ' chars)';
             break;
+        case 'reviewing':
+            icon = '\u25cf'; cls = 'status-progress';
+            text = 'Reviewing...' + (data.cycle ? ' (cycle ' + data.cycle + ')' : '');
+            break;
+        case 'review_passed':
+            icon = '\u2713'; cls = 'status-success';
+            text = 'Review passed';
+            break;
+        case 'review_revise':
+            icon = '\u2717'; cls = 'status-error';
+            text = 'Reviewer found ' + (data.summary || 'issues');
+            if (data.issues) {
+                addStatusLine(icon, cls, text);
+                for (var i = 0; i < data.issues.length; i++) {
+                    var issue = data.issues[i];
+                    addStatusLine(' ', '', '  \u00b7 [' + issue.severity + '] ' + issue.where + ': ' + issue.problem);
+                }
+                return;
+            }
+            break;
+        case 'revising':
+            icon = '\u25cf'; cls = 'status-progress';
+            text = 'Revising based on feedback...';
+            break;
+        case 'revised':
+            icon = '\u2713'; cls = 'status-success';
+            text = 'Revised (' + (data.chars||'?') + ' chars)';
+            break;
+        case 'review_error':
+            icon = '\u2717'; cls = 'status-error';
+            text = 'Review failed: ' + (data.message || 'unknown error');
+            break;
         case 'compiling':
             icon = '\u25cf'; cls = 'status-progress';
             text = 'Compiling...';
@@ -922,9 +954,11 @@ def _run_generate(state: _State, prompt: str):
     state.generating = True
     state.cancel.clear()
     max_retries = 3
+    max_review_cycles = 2
 
     try:
         from .prompts import get_system_prompt
+        from .reviewer import Reviewer, build_revision_prompt
 
         system_prompt = get_system_prompt()
 
@@ -940,15 +974,13 @@ def _run_generate(state: _State, prompt: str):
         except ImportError:
             pass
 
+        # --- Step 1: Generate ---
         state.emit(
             "status",
             {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
         )
         if gen_kwargs:
-            print("[gui] Streaming enabled, emitting stream_start")
             state.emit("stream_start", {})
-        else:
-            print(f"[gui] No streaming for {type(state.provider).__name__}")
         scratchscript = asyncio.run(
             state.provider.generate(prompt, system_prompt, **gen_kwargs)
         )
@@ -960,6 +992,77 @@ def _run_generate(state: _State, prompt: str):
         state.emit("status", {"step": "generated", "chars": len(scratchscript)})
         state.emit("code", {"text": scratchscript})
 
+        # --- Step 2: Review loop ---
+        reviewer = Reviewer(state.provider)
+        for cycle in range(max_review_cycles):
+            if state.cancel.is_set():
+                state.emit("status", {"step": "error", "message": "Cancelled"})
+                return
+
+            state.emit("status", {"step": "reviewing", "cycle": cycle + 1})
+            try:
+                review_result = asyncio.run(
+                    reviewer.review(prompt, scratchscript)
+                )
+            except Exception as e:
+                state.emit(
+                    "status",
+                    {"step": "review_error", "message": str(e)},
+                )
+                break
+
+            if review_result.verdict == "PASS":
+                state.emit("status", {"step": "review_passed"})
+                break
+
+            # Emit issues for display
+            issues_data = [
+                {
+                    "severity": iss.severity,
+                    "where": iss.where,
+                    "problem": iss.problem,
+                }
+                for iss in review_result.issues
+            ]
+            state.emit(
+                "status",
+                {
+                    "step": "review_revise",
+                    "summary": review_result.summary(),
+                    "issues": issues_data,
+                },
+            )
+
+            # Revise
+            state.emit("status", {"step": "revising"})
+            revision_prompt = build_revision_prompt(
+                prompt, scratchscript, review_result
+            )
+            try:
+                if gen_kwargs:
+                    state.emit("stream_start", {})
+                scratchscript = asyncio.run(
+                    state.provider.generate(
+                        revision_prompt, system_prompt, **gen_kwargs
+                    )
+                )
+            except Exception as e:
+                state.emit(
+                    "status",
+                    {"step": "error", "message": f"Revision failed: {e}"},
+                )
+                break
+
+            if state.cancel.is_set():
+                state.emit("status", {"step": "error", "message": "Cancelled"})
+                return
+
+            state.emit(
+                "status", {"step": "revised", "chars": len(scratchscript)}
+            )
+            state.emit("code", {"text": scratchscript})
+
+        # --- Step 3: Compile with retry loop ---
         for attempt in range(max_retries + 1):
             if state.cancel.is_set():
                 state.emit("status", {"step": "error", "message": "Cancelled"})

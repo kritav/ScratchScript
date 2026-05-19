@@ -35,6 +35,23 @@ class OllamaProvider(Provider):
             pass
         return "llama3.1"
 
+    async def _check_server(self):
+        """Verify Ollama is reachable before starting a long request."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.base_url}/api/tags")
+                resp.raise_for_status()
+        except httpx.ConnectError:
+            raise ConnectionError(
+                f"Cannot connect to Ollama at {self.base_url}. "
+                f"Is it running? Start it with: ollama serve"
+            )
+        except httpx.TimeoutException:
+            raise ConnectionError(
+                f"Ollama at {self.base_url} is not responding. "
+                f"Is it running? Start it with: ollama serve"
+            )
+
     async def generate(
         self,
         user_prompt: str,
@@ -42,6 +59,8 @@ class OllamaProvider(Provider):
         *,
         on_token: Optional[Callable[[str], None]] = None,
     ) -> str:
+        await self._check_server()
+
         payload = {
             "model": self.model,
             "messages": [
