@@ -771,7 +771,8 @@ def _detect_provider(state: _State):
             type(provider).__name__.replace("Provider", "").lower()
         )
         state.model_name = getattr(provider, "model", "default")
-    except Exception:
+    except Exception as e:
+        print(f"[provider] No provider detected: {type(e).__name__}: {e}")
         state.provider = None
 
 

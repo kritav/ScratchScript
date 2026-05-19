@@ -29,8 +29,10 @@ async def detect_provider(
                 from .ollama import OllamaProvider
 
                 return OllamaProvider(model=model)
-    except Exception:
-        pass
+            else:
+                print(f"[provider] Ollama responded with status {resp.status_code}")
+    except Exception as e:
+        print(f"[provider] Ollama check failed: {type(e).__name__}: {e}")
 
     # Check for API keys
     if os.environ.get("ANTHROPIC_API_KEY"):
