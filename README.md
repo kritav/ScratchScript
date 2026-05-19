@@ -1,5 +1,7 @@
 # ScratchScript
-
+<div align="center">
+  <img src="/images/scratchscript.png" width="500" />
+</div>
 Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
 
 Uses a two-stage architecture: an LLM generates ScratchScript DSL code, then a deterministic compiler converts it to `.sb3`.
