@@ -238,6 +238,14 @@ body {
 }
 #code-stream.visible { display: block; }
 .stream-think { color: var(--text-disabled); font-style: italic; }
+.stream-waiting {
+    color: var(--text-disabled);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
 #code-editor {
     display: none;
     width: 100%;
@@ -354,7 +362,7 @@ evtSource.addEventListener('stream_start', function(e) {
     codeEmpty.style.display = 'none';
     codeDisplay.classList.remove('visible');
     codeStream.classList.add('visible');
-    codeStream.innerHTML = '';
+    codeStream.innerHTML = '<span class="stream-waiting">Waiting for model response\u2026</span>';
 });
 evtSource.addEventListener('stream', function(e) {
     var data = JSON.parse(e.data);
