@@ -224,6 +224,20 @@ body {
     padding-right: 16px;
 }
 .code-line.error-line { border-left: 2px solid var(--error); }
+#code-stream {
+    display: none;
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-y: auto;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+}
+#code-stream.visible { display: block; }
+.stream-think { color: var(--text-disabled); font-style: italic; }
 #code-editor {
     display: none;
     width: 100%;
@@ -284,6 +298,7 @@ body {
         <div id="code-container">
             <div id="code-empty">ScratchScript will appear here<br><a href="#" id="edit-link">or write it yourself</a></div>
             <div id="code-display"></div>
+            <div id="code-stream"></div>
             <textarea id="code-editor" spellcheck="false"></textarea>
         </div>
         <div id="status-bar">Initializing...</div>
@@ -309,6 +324,7 @@ var KEYWORDS = new Set([
 var generating = false;
 var editMode = false;
 var currentCode = '';
+var streamBuffer = '';
 var lastPrompt = '';
 var currentStatusGroup = null;
 
@@ -323,6 +339,7 @@ var codeEmpty = document.getElementById('code-empty');
 var codeDisplay = document.getElementById('code-display');
 var codeEditor = document.getElementById('code-editor');
 var statusBar = document.getElementById('status-bar');
+var codeStream = document.getElementById('code-stream');
 var compileBtn = document.getElementById('compile-btn');
 var editLink = document.getElementById('edit-link');
 
@@ -332,6 +349,18 @@ evtSource.addEventListener('status', function(e) { onStatus(JSON.parse(e.data));
 evtSource.addEventListener('code', function(e) { onCode(JSON.parse(e.data)); });
 evtSource.addEventListener('download', function(e) { onDownload(JSON.parse(e.data)); });
 evtSource.addEventListener('compile_result', function(e) { onCompileResult(JSON.parse(e.data)); });
+evtSource.addEventListener('stream_start', function(e) {
+    streamBuffer = '';
+    codeEmpty.style.display = 'none';
+    codeDisplay.classList.remove('visible');
+    codeStream.classList.add('visible');
+    codeStream.innerHTML = '';
+});
+evtSource.addEventListener('stream', function(e) {
+    var data = JSON.parse(e.data);
+    streamBuffer += data.token;
+    renderStreamContent(streamBuffer);
+});
 evtSource.addEventListener('generating_done', function(e) { generating = false; });
 
 /* -- Event handlers -- */
@@ -384,6 +413,7 @@ function onStatus(data) {
 
 function onCode(data) {
     currentCode = data.text;
+    codeStream.classList.remove('visible');
     renderCode(data.text);
     exitEditMode();
 }
@@ -502,6 +532,30 @@ function renderCode(text) {
         html += '<div class="code-line"><span class="ln">' + (i+1) + '</span><span class="code">' + highlightLine(lines[i]) + '</span></div>';
     }
     codeDisplay.innerHTML = html;
+}
+
+function renderStreamContent(text) {
+    var html = '';
+    var i = 0;
+    while (i < text.length) {
+        var thinkStart = text.indexOf('<think>', i);
+        if (thinkStart === -1) {
+            html += escapeHtml(text.substring(i));
+            break;
+        }
+        if (thinkStart > i) {
+            html += escapeHtml(text.substring(i, thinkStart));
+        }
+        var thinkEnd = text.indexOf('</think>', thinkStart);
+        if (thinkEnd === -1) {
+            html += '<span class="stream-think">' + escapeHtml(text.substring(thinkStart + 7)) + '</span>';
+            break;
+        }
+        html += '<span class="stream-think">' + escapeHtml(text.substring(thinkStart + 7, thinkEnd)) + '</span>';
+        i = thinkEnd + 8;
+    }
+    codeStream.innerHTML = html;
+    codeStream.scrollTop = codeStream.scrollHeight;
 }
 
 function highlightLine(line) {
@@ -860,12 +914,29 @@ def _run_generate(state: _State, prompt: str):
 
         system_prompt = get_system_prompt()
 
+        # Set up token streaming for providers that support it
+        gen_kwargs = {}
+        try:
+            from .providers.ollama import OllamaProvider
+
+            if isinstance(state.provider, OllamaProvider):
+                gen_kwargs["on_token"] = lambda tok: state.emit(
+                    "stream", {"token": tok}
+                )
+        except ImportError:
+            pass
+
         state.emit(
             "status",
             {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
         )
+        if gen_kwargs:
+            print("[gui] Streaming enabled, emitting stream_start")
+            state.emit("stream_start", {})
+        else:
+            print(f"[gui] No streaming for {type(state.provider).__name__}")
         scratchscript = asyncio.run(
-            state.provider.generate(prompt, system_prompt)
+            state.provider.generate(prompt, system_prompt, **gen_kwargs)
         )
 
         if state.cancel.is_set():
@@ -907,8 +978,12 @@ def _run_generate(state: _State, prompt: str):
                     },
                 )
                 try:
+                    if gen_kwargs:
+                        state.emit("stream_start", {})
                     scratchscript = asyncio.run(
-                        state.provider.fix(scratchscript, error_text, system_prompt)
+                        state.provider.fix(
+                            scratchscript, error_text, system_prompt, **gen_kwargs
+                        )
                     )
                     if state.cancel.is_set():
                         state.emit(
