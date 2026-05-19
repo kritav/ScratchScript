@@ -21,17 +21,21 @@ class OllamaProvider(Provider):
     async def generate(self, user_prompt: str, system_prompt: str) -> str:
         payload = {
             "model": self.model,
-            "prompt": user_prompt,
-            "system": system_prompt,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             "stream": False,
             "options": {"temperature": 0.3},
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(f"{self.base_url}/api/generate", json=payload)
+            resp = await client.post(f"{self.base_url}/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return self._strip_code_fences(data.get("response", ""))
+            return self._strip_code_fences(
+                data.get("message", {}).get("content", "")
+            )
 
     async def fix(self, scratchscript: str, errors: str, system_prompt: str) -> str:
         fix_prompt = self._build_fix_prompt(scratchscript, errors)
