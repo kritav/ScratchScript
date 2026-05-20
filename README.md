@@ -5,11 +5,11 @@
 ---
 
 ## How To
-<div align="center">
+<div align="left">
   <img src="/images/prompt.gif" width="500" />
 </div>
 Type out your prompt in natural language in the bottom left corner. (Requires API key or Ollama running locally)
-<div align="center">
+<div align="left">
   <img src="/images/revision.gif" width="500" />
 </div>
 The LLM output is then checked for errors by the reviewer agent, as seen above.
