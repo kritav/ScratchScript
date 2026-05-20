@@ -3,35 +3,46 @@
   <img src="/images/scratchscript.png" width="500" />
 </div>
 
+Convert natural language descriptions into working Scratch 3.0 `.sb3` files using a two-stage architecture: an LLM generates ScratchScript DSL code, then a deterministic compiler converts it to `.sb3`. Includes both a web UI and a CLI.
+
 ## How To
+
+### Web UI
+
+Launch the web interface with:
+```bash
+scratchscript-gui
+```
+
 Type out your prompt in natural language in the bottom left corner. Requires an API key or Ollama running locally in order to start. The "Import .sb3" button also enables users to import preexisting projects into the editor.
 <div align="left">
   <img src="/images/prompt.gif" width="500" />
 </div>
+
 The LLM output is then checked for errors by the reviewer agent, as seen below. This is necessary to catch any logical errors that would prevent the program from working, or stylistic issues with the code output that would cause compiler errors.
 <div align="left">
   <img src="/images/revision.gif" width="500" />
 </div>
-The code is finally written in ScratchScript, which is a domain-specific language and a textual representation of Scratch's block-based coding language, shown in the image below. ScratchScript is an indentation-based language that maps to Scratch blocks.
+
+The code is finally written in ScratchScript, which is a domain-specific language and a textual representation of Scratch's block-based coding language, shown in the image below. ScratchScript is an indentation-based language that maps 1:1 to Scratch blocks. You can also manually edit the generated code in the right panel before compiling.
 <div align="left">
   <img src="/images/scratchscript.gif" width="500" />
 </div>
+
 Download the newly created .sb3 file by clicking the blue text.
 <div align="left">
   <img src="/images/download.gif" width="500" />
 </div>
-Open up scratch.mit.edu, click "Create" to make a new project. Then, click "File" and "Load from your computer" to import the .sb3 file you just downloaded.
+
+Open up [scratch.mit.edu](https://scratch.mit.edu), click "Create" to make a new project. Then, click "File" and "Load from your computer" to import the .sb3 file you just downloaded.
 <div align="left">
   <img src="/images/import.gif" width="500" />
 </div>
+
 Test that the game works. (It does!)
 <div align="left">
   <img src="/images/game.gif" width="500" />
 </div>
-
-Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
-
-Uses a two-stage architecture: an LLM generates ScratchScript DSL code, then a deterministic compiler converts it to `.sb3`.
 
 ## Install
 
@@ -42,10 +53,19 @@ pip install -e .
 pip install -e ".[claude]"    # Anthropic Claude
 pip install -e ".[openai]"    # OpenAI
 pip install -e ".[gemini]"    # Google Gemini
-pip install -e ".[all]"       # All providers
+pip install -e ".[gui]"       # Web UI (Flask)
+pip install -e ".[all]"       # All providers + web UI
 ```
 
 ## Usage
+
+### Web UI
+
+```bash
+scratchscript-gui
+```
+
+Opens a browser-based editor with a chat panel for prompts and a code panel with syntax highlighting. Supports real-time streaming with Ollama, manual code editing, and `.sb3` import/export.
 
 ### Generate from natural language (requires an LLM provider)
 
@@ -53,6 +73,7 @@ pip install -e ".[all]"       # All providers
 scratchscript generate "make a cat that chases the mouse pointer"
 scratchscript generate --provider ollama "make a platformer"
 scratchscript generate --provider claude -o game.sb3 "make a pong game"
+scratchscript generate --fast "make a pong game"  # skip the reviewer stage
 ```
 
 ### Compile a .scratchscript file directly
@@ -62,9 +83,17 @@ scratchscript compile game.scratchscript
 scratchscript compile game.scratchscript -o output.sb3
 ```
 
+### Import and decompile an existing .sb3 file
+
+```bash
+scratchscript import game.sb3
+scratchscript import game.sb3 -o game.scratchscript
+scratchscript import game.sb3 --modify "add a score counter" --provider ollama
+```
+
 ## ScratchScript DSL
 
-ScratchScript is an indentation-based language that maps to Scratch blocks:
+ScratchScript is an indentation-based language that maps to Scratch blocks. It supports 150+ block types across motion, looks, sound, events, control, sensing, operators, data, pen, and music categories.
 
 ```
 project
@@ -97,15 +126,39 @@ See `examples/` for complete game examples (Flappy Bird, Pong, platformer).
 
 ScratchScript auto-detects available providers in this order:
 
-1. **Ollama** (if running locally) — `ollama serve`
-2. **Claude** — set `ANTHROPIC_API_KEY`
-3. **OpenAI** — set `OPENAI_API_KEY`
-4. **Gemini** — set `GEMINI_API_KEY`
+1. **Ollama** (if running locally) — `ollama serve` — no API key needed
+2. **Claude** — set `ANTHROPIC_API_KEY` — default model: `claude-sonnet-4-6`
+3. **OpenAI** — set `OPENAI_API_KEY` — default model: `gpt-4o`
+4. **Gemini** — set `GEMINI_API_KEY` — default model: `gemini-2.0-flash`
 
-Override with `--provider`:
+Override with `--provider` and `--model`:
 ```bash
 scratchscript generate --provider claude --model claude-sonnet-4-6 "make a game"
 ```
+
+## Architecture
+
+```
+User prompt -> LLM Provider -> ScratchScript DSL -> Reviewer -> Compiler -> .sb3 file
+                                                       ^                |
+                                                       |   (retry on    |
+                                                       +--- error) -----+
+```
+
+**Compiler pipeline:**
+- **Lexer** (`compiler/lexer.py`): indentation-aware tokenizer with support for keywords, strings, numbers, and color literals
+- **Parser** (`compiler/parser.py`): recursive descent parser producing an AST
+- **Code Generator** (`compiler/codegen.py`): AST to Scratch 3.0 project.json
+- **Bundler** (`compiler/bundler.py`): project.json + downloaded assets into .sb3 ZIP
+- **Validator** (`compiler/validator.py`): error checking with fuzzy match suggestions
+- **Decompiler** (`compiler/decompiler.py`): reverse compilation from .sb3 back to ScratchScript
+
+**Other components:**
+- **Reviewer** (`reviewer.py`): LLM-based code review agent that catches logical and stylistic errors before compilation
+- **Providers** (`providers/`): pluggable LLM backends (Ollama, Claude, OpenAI, Gemini)
+- **Asset Library** (`assets/library.py`): downloads and caches Scratch costumes, sounds, and backdrops from the Scratch CDN
+- **CLI** (`cli.py`): Click-based command-line interface
+- **Web UI** (`gui.py`): Flask-based browser interface with real-time streaming and syntax highlighting
 
 ## Development
 
@@ -114,19 +167,6 @@ pip install -e ".[dev]"
 pytest tests/
 ruff check src/
 ```
-
-## Architecture
-
-```
-User prompt -> LLM Provider -> ScratchScript text -> Compiler -> Validation + retry loop -> .sb3 file
-```
-
-- **Lexer** (`lexer.py`): indentation-aware tokenizer
-- **Parser** (`parser.py`): recursive descent parser producing AST
-- **Code Generator** (`codegen.py`): AST to Scratch 3.0 project.json
-- **Bundler** (`bundler.py`): project.json + assets into .sb3 ZIP
-- **Validator** (`validator.py`): error checking with fuzzy suggestions
-- **Asset Library** (`assets/library.py`): Scratch asset CDN download + cache
 
 ## License
 
