@@ -45,11 +45,28 @@ body {
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 14px;
+    display: flex;
+    flex-direction: column;
+}
+#site-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex: 0 0 auto;
+}
+#site-header img {
+    height: 40px;
+    width: auto;
+    display: block;
 }
 #app {
     display: flex;
-    height: 100vh;
+    flex: 1;
     width: 100vw;
+    min-height: 0;
 }
 
 /* -- Chat Panel -- */
@@ -312,6 +329,9 @@ body {
 </style>
 </head>
 <body>
+<header id="site-header">
+    <img src="/images/scratchscript.png" alt="ScratchScript">
+</header>
 <div id="app">
     <div id="chat">
         <div id="messages"></div>
@@ -1302,6 +1322,16 @@ def main():
     @app.route("/")
     def index():
         return _HTML
+
+    @app.route("/images/<path:filename>")
+    def serve_image(filename):
+        images_dir = Path(__file__).resolve().parent.parent.parent / "images"
+        target = (images_dir / filename).resolve()
+        if not str(target).startswith(str(images_dir.resolve())):
+            return "", 404
+        if target.is_file():
+            return send_file(target)
+        return "", 404
 
     @app.route("/api/provider")
     def api_provider():
