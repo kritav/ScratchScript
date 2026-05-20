@@ -2,22 +2,20 @@
 <div align="center">
   <img src="/images/scratchscript.png" width="500" />
 </div>
----
 
 ## How To
+Type out your prompt in natural language in the bottom left corner. Requires an API key or Ollama running locally in order to start. The "Import .sb3" button also enables users to import preexisting projects into the editor.
 <div align="left">
   <img src="/images/prompt.gif" width="500" />
 </div>
-Type out your prompt in natural language in the bottom left corner. (Requires API key or Ollama running locally)
+The LLM output is then checked for errors by the reviewer agent, as seen below. This is necessary to catch any logical errors that would prevent the program from working, or stylistic issues with the code output that would cause compiler errors.
 <div align="left">
   <img src="/images/revision.gif" width="500" />
 </div>
-The LLM output is then checked for errors by the reviewer agent, as seen above.
+The code is finally written in ScratchScript, which is a domain-specific language and a textual representation of Scratch's block-based coding language, shown in the image below. ScratchScript is an indentation-based language that maps to Scratch blocks.
 <div align="center">
   <img src="/images/scratchscript.gif" width="500" />
 </div>
-The code is finally written in ScratchScript, a textual representation of Scratch's block-based coding language, shown in the image above.
-
 
 Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
 
