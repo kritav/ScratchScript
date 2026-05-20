@@ -2,10 +2,22 @@
 <div align="center">
   <img src="/images/scratchscript.png" width="500" />
 </div>
+---
 
+## How To
 <div align="center">
   <img src="/images/prompt.gif" width="500" />
 </div>
+Type out your prompt in natural language in the bottom left corner. (Requires API key or Ollama running locally)
+<div align="center">
+  <img src="/images/revision.gif" width="500" />
+</div>
+The LLM output is then checked for errors by the reviewer agent, as seen above.
+<div align="center">
+  <img src="/images/scratchscript.gif" width="500" />
+</div>
+The code is finally written in ScratchScript, a textual representation of Scratch's block-based coding language, shown in the image above.
+
 
 Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
 
