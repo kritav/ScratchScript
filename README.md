@@ -16,6 +16,18 @@ The code is finally written in ScratchScript, which is a domain-specific languag
 <div align="left">
   <img src="/images/scratchscript.gif" width="500" />
 </div>
+Download the newly created .sb3 file by clicking the blue text.
+<div align="left">
+  <img src="/images/download.gif" width="500" />
+</div>
+Open up scratch.mit.edu, click "Create" to make a new project. Then, click "File" and "Load from your computer" to import the .sb3 file you just downloaded.
+<div align="left">
+  <img src="/images/import.gif" width="500" />
+</div>
+Test that the game works. (It does!)
+<div align="left">
+  <img src="/images/game.gif" width="500" />
+</div>
 
 Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
 
