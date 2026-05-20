@@ -121,8 +121,13 @@ body {
     border-top: 1px solid var(--border);
     padding: 12px 16px;
 }
+#input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
 #prompt-input {
-    width: 100%;
+    flex: 1;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -138,6 +143,21 @@ body {
 }
 #prompt-input::placeholder { color: var(--text-disabled); }
 #prompt-input:focus { border-color: rgba(255, 255, 255, 0.15); }
+#import-btn {
+    flex: 0 0 auto;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 100ms ease-out, color 100ms ease-out;
+    white-space: nowrap;
+}
+#import-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+#import-file { display: none; }
 
 /* -- Divider -- */
 #divider {
@@ -296,7 +316,11 @@ body {
     <div id="chat">
         <div id="messages"></div>
         <div id="input-area">
-            <textarea id="prompt-input" placeholder="Describe a Scratch project..." rows="1"></textarea>
+            <div id="input-row">
+                <textarea id="prompt-input" placeholder="Describe a Scratch project..." rows="1"></textarea>
+                <button id="import-btn">Import .sb3</button>
+                <input type="file" id="import-file" accept=".sb3">
+            </div>
         </div>
     </div>
     <div id="divider"></div>
@@ -354,6 +378,40 @@ var statusBar = document.getElementById('status-bar');
 var codeStream = document.getElementById('code-stream');
 var compileBtn = document.getElementById('compile-btn');
 var editLink = document.getElementById('edit-link');
+var importBtn = document.getElementById('import-btn');
+var importFile = document.getElementById('import-file');
+var importedCode = '';
+
+/* -- Import handling -- */
+importBtn.addEventListener('click', function() { importFile.click(); });
+importFile.addEventListener('change', function() {
+    var file = this.files[0];
+    if (!file) return;
+    var formData = new FormData();
+    formData.append('file', file);
+    startStatusGroup();
+    addStatusLine('\u25cf', 'status-progress', 'Importing ' + file.name + '...');
+    fetch('/api/import', { method: 'POST', body: formData })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                addStatusLine('\u2717', 'status-error', 'Import failed: ' + data.error);
+                return;
+            }
+            currentCode = data.code;
+            importedCode = data.code;
+            renderCode(data.code);
+            codeEmpty.style.display = 'none';
+            codeDisplay.classList.add('visible');
+            addStatusLine('\u2713', 'status-success',
+                'Imported ' + file.name + ' (' + data.sprites + ' sprites, ' + data.scripts + ' scripts)');
+            promptInput.placeholder = 'Describe changes to the imported project...';
+        })
+        .catch(function(e) {
+            addStatusLine('\u2717', 'status-error', 'Import error: ' + e.message);
+        });
+    this.value = '';
+});
 
 /* -- Server-Sent Events -- */
 var evtSource = new EventSource('/api/events');
@@ -747,10 +805,14 @@ function submitPrompt() {
     startStatusGroup();
     promptInput.value = '';
     promptInput.style.height = 'auto';
+    var payload = {prompt: text};
+    if (importedCode || currentCode) {
+        payload.existing_code = currentCode || importedCode;
+    }
     fetch('/api/generate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({prompt: text})
+        body: JSON.stringify(payload)
     });
 }
 
@@ -951,7 +1013,7 @@ def _bundle_result(state: _State, project_json: dict, name: str):
     state.emit("download", {"filename": state.sb3_filename, "size": size})
 
 
-def _run_generate(state: _State, prompt: str):
+def _run_generate(state: _State, prompt: str, existing_code: str = ""):
     if state.generating:
         return
     if not state.provider:
@@ -976,7 +1038,7 @@ def _run_generate(state: _State, prompt: str):
     state.generating = True
     state.cancel.clear()
     max_retries = 3
-    max_review_cycles = 2
+    max_review_cycles = 1
 
     try:
         from .prompts import get_system_prompt
@@ -1013,6 +1075,16 @@ def _run_generate(state: _State, prompt: str):
         except Exception:
             pass  # Non-Ollama providers skip this
 
+        # If existing code is provided, wrap into a modification prompt
+        effective_prompt = prompt
+        if existing_code:
+            effective_prompt = (
+                f"Here is an existing ScratchScript project:\n"
+                f"{existing_code}\n\n"
+                f"The user wants to modify it: {prompt}\n\n"
+                f"Output the complete modified ScratchScript with the requested changes applied."
+            )
+
         state.emit(
             "status",
             {"step": "generating", "attempt": 1, "max_attempts": max_retries + 1},
@@ -1020,7 +1092,7 @@ def _run_generate(state: _State, prompt: str):
         if gen_kwargs:
             state.emit("stream_start", {})
         scratchscript = asyncio.run(
-            state.provider.generate(prompt, system_prompt, **gen_kwargs)
+            state.provider.generate(effective_prompt, system_prompt, **gen_kwargs)
         )
 
         if state.cancel.is_set():
@@ -1239,12 +1311,45 @@ def main():
     def api_generate():
         data = request.get_json(force=True)
         prompt = data.get("prompt", "")
+        existing_code = data.get("existing_code", "")
         if not prompt:
             return jsonify({"error": "No prompt provided"}), 400
         threading.Thread(
-            target=_run_generate, args=(state, prompt), daemon=True
+            target=_run_generate, args=(state, prompt, existing_code), daemon=True
         ).start()
         return jsonify({"ok": True})
+
+    @app.route("/api/import", methods=["POST"])
+    def api_import():
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        f = request.files["file"]
+        if not f.filename or not f.filename.endswith(".sb3"):
+            return jsonify({"error": "File must be an .sb3 file"}), 400
+        try:
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix=".sb3", delete=False)
+            f.save(tmp.name)
+            tmp.close()
+            from .compiler.bundler import unbundle
+            from .compiler.decompiler import decompile
+            project_json = unbundle(tmp.name)
+            code = decompile(project_json)
+            targets = project_json.get("targets", [])
+            sprites = sum(1 for t in targets if not t.get("isStage", False))
+            scripts = sum(
+                1 for t in targets
+                for b in t.get("blocks", {}).values()
+                if isinstance(b, dict) and b.get("topLevel") and not b.get("shadow")
+            )
+            return jsonify({
+                "code": code,
+                "sprites": sprites,
+                "scripts": scripts,
+                "filename": f.filename,
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/api/compile", methods=["POST"])
     def api_compile():

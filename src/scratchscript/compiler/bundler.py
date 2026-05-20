@@ -1,4 +1,5 @@
-"""Bundler — combines project.json + assets into a .sb3 ZIP file."""
+"""Bundler — combines project.json + assets into a .sb3 ZIP file,
+and unbundles .sb3 files back to project.json."""
 
 from __future__ import annotations
 
@@ -14,6 +15,25 @@ from ..assets.library import (
     AssetLibrary,
     get_library,
 )
+
+
+def unbundle(sb3_path: str | Path) -> dict:
+    """Extract project.json from an .sb3 file.
+
+    Args:
+        sb3_path: Path to the .sb3 file.
+
+    Returns:
+        The parsed project.json dict.
+
+    Raises:
+        FileNotFoundError: If the .sb3 file doesn't exist.
+        KeyError: If project.json is missing from the archive.
+        zipfile.BadZipFile: If the file isn't a valid ZIP.
+    """
+    sb3_path = Path(sb3_path)
+    with zipfile.ZipFile(sb3_path, "r") as zf:
+        return json.loads(zf.read("project.json"))
 
 
 async def bundle(
