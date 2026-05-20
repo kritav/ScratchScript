@@ -61,6 +61,11 @@ body {
     height: 40px;
     width: auto;
     display: block;
+    transform-origin: center;
+    transition: transform 200ms ease-out;
+}
+#site-header img:hover {
+    transform: scale(1.1);
 }
 #app {
     display: flex;
