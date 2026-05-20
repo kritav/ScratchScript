@@ -2,6 +2,33 @@
 <div align="center">
   <img src="/images/scratchscript.png" width="500" />
 </div>
+
+## How To
+Type out your prompt in natural language in the bottom left corner. Requires an API key or Ollama running locally in order to start. The "Import .sb3" button also enables users to import preexisting projects into the editor.
+<div align="left">
+  <img src="/images/prompt.gif" width="500" />
+</div>
+The LLM output is then checked for errors by the reviewer agent, as seen below. This is necessary to catch any logical errors that would prevent the program from working, or stylistic issues with the code output that would cause compiler errors.
+<div align="left">
+  <img src="/images/revision.gif" width="500" />
+</div>
+The code is finally written in ScratchScript, which is a domain-specific language and a textual representation of Scratch's block-based coding language, shown in the image below. ScratchScript is an indentation-based language that maps to Scratch blocks.
+<div align="left">
+  <img src="/images/scratchscript.gif" width="500" />
+</div>
+Download the newly created .sb3 file by clicking the blue text.
+<div align="left">
+  <img src="/images/download.gif" width="500" />
+</div>
+Open up scratch.mit.edu, click "Create" to make a new project. Then, click "File" and "Load from your computer" to import the .sb3 file you just downloaded.
+<div align="left">
+  <img src="/images/import.gif" width="500" />
+</div>
+Test that the game works. (It does!)
+<div align="left">
+  <img src="/images/game.gif" width="500" />
+</div>
+
 Convert natural language descriptions into working Scratch 3.0 `.sb3` files.
 
 Uses a two-stage architecture: an LLM generates ScratchScript DSL code, then a deterministic compiler converts it to `.sb3`.
