@@ -13,7 +13,7 @@ The LLM output is then checked for errors by the reviewer agent, as seen below. 
   <img src="/images/revision.gif" width="500" />
 </div>
 The code is finally written in ScratchScript, which is a domain-specific language and a textual representation of Scratch's block-based coding language, shown in the image below. ScratchScript is an indentation-based language that maps to Scratch blocks.
-<div align="center">
+<div align="left">
   <img src="/images/scratchscript.gif" width="500" />
 </div>
 
