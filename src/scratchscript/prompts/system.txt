@@ -136,4 +136,4 @@ Call: `jump 50`
 7. Use "myself" when cloning the current sprite
 8. String arguments must be in double quotes
 9. Use parentheses for complex expressions: `(x + 1) * 2`
-10. Backdrop/costume names are from Scratch's built-in library
+10. Backdrop/costume/sound names must come from Scratch's built-in library — if a "Built-in Assets Matching This Request" section is provided below, use those exact names

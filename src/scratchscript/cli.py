@@ -71,7 +71,7 @@ async def _generate(
     verbose: bool,
 ):
     """Generate ScratchScript from a prompt and compile to .sb3."""
-    from .prompts import get_system_prompt
+    from .prompts import build_asset_hint, get_system_prompt
     from .providers import detect_provider
     from .reviewer import Reviewer, build_revision_prompt, extract_scratchscript
 
@@ -86,6 +86,20 @@ async def _generate(
     click.echo(f"Using {provider_label} provider...")
 
     system_prompt = get_system_prompt()
+
+    # Inject real asset names matching the prompt so the model doesn't
+    # invent costume/sound names. Skipped silently if offline.
+    try:
+        from .assets.library import get_library
+
+        library = await get_library()
+        hint = build_asset_hint(prompt, library)
+        if hint:
+            system_prompt += hint
+            if verbose:
+                click.echo(f"--- Asset hint ---{hint}\n--- End ---")
+    except Exception:
+        pass
 
     # Generate ScratchScript
     click.echo("Generating ScratchScript...")

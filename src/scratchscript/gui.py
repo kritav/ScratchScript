@@ -1071,10 +1071,20 @@ def _run_generate(state: _State, prompt: str, existing_code: str = ""):
     max_review_cycles = 1
 
     try:
-        from .prompts import get_system_prompt
+        from .prompts import build_asset_hint, get_system_prompt
         from .reviewer import Reviewer, build_revision_prompt, extract_scratchscript
 
         system_prompt = get_system_prompt()
+
+        # Inject real asset names matching the prompt so the model doesn't
+        # invent costume/sound names. Skipped silently if offline.
+        try:
+            from .assets.library import get_library
+
+            library = asyncio.run(get_library())
+            system_prompt += build_asset_hint(prompt, library)
+        except Exception:
+            pass
 
         # Set up token streaming for providers that support it
         gen_kwargs = {}
