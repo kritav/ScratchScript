@@ -221,8 +221,23 @@ class AssetLibrary:
                     tokens.add(word[:-1])  # crude plural → singular
 
         def search(names, limit: int) -> list[str]:
-            hits = [n for n in names if any(t in n for t in tokens)]
-            return sorted(hits)[:limit]
+            # Round-robin across tokens so one keyword with many assets
+            # (e.g. "dinosaur") can't crowd out the others before the cap
+            per_token = [sorted(n for n in names if t in n) for t in sorted(tokens)]
+            hits: list[str] = []
+            seen: set[str] = set()
+            i = 0
+            while len(hits) < limit and any(per_token):
+                bucket = per_token[i % len(per_token)]
+                if bucket:
+                    name = bucket.pop(0)
+                    if name not in seen:
+                        seen.add(name)
+                        hits.append(name)
+                i += 1
+                if i > 10000:  # safety
+                    break
+            return hits
 
         return {
             "costumes": search(self._costumes, 40),
