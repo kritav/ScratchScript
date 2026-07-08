@@ -981,6 +981,7 @@ def _detect_provider(state: _State):
 
 
 def _try_compile(source: str) -> Optional[dict]:
+    from .compiler.autorepair import repair_project
     from .compiler.codegen import generate
     from .compiler.parser import ParseError, parse
     from .compiler.validator import validate
@@ -989,6 +990,8 @@ def _try_compile(source: str) -> Optional[dict]:
         project = parse(source)
     except ParseError:
         return None
+    for note in repair_project(project):
+        print(f"[repair] {note}")
     validate(project)
     try:
         return generate(project)
@@ -997,12 +1000,14 @@ def _try_compile(source: str) -> Optional[dict]:
 
 
 def _get_compile_errors(source: str) -> str:
+    from .compiler.autorepair import repair_project
     from .compiler.parser import ParseError, parse
     from .compiler.validator import validate
 
     errors: list[str] = []
     try:
         project = parse(source)
+        repair_project(project)
         result = validate(project)
         if not result.is_valid:
             errors.append(result.format_errors())

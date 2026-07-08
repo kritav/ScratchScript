@@ -15,6 +15,7 @@ from ..assets.library import (
     AssetLibrary,
     get_library,
 )
+from .autorepair import best_match
 
 
 def unbundle(sb3_path: str | Path) -> dict:
@@ -140,6 +141,22 @@ def _resolve_assets(
             if not resolved_info:
                 resolved_info = library.lookup_costume(name)
 
+            if not resolved_info:
+                # Near-miss name — a fuzzy library match beats a "?" placeholder.
+                # margin=0: close runners-up (dinosaur1-a vs dinosaur2-a) are fine.
+                candidates = library.get_all_costume_names()
+                if is_stage:
+                    candidates = library.get_all_backdrop_names() + candidates
+                fixed = best_match(name.lower(), candidates, margin=0.0)
+                if fixed:
+                    if is_stage:
+                        resolved_info = library.lookup_backdrop(fixed)
+                    if not resolved_info:
+                        resolved_info = library.lookup_costume(fixed)
+                if resolved_info:
+                    print(f"[assets] costume {name!r} not in library, using {fixed!r}")
+                    costume["name"] = fixed
+
             if resolved_info:
                 costume["assetId"] = resolved_info["assetId"]
                 costume["md5ext"] = resolved_info["md5ext"]
@@ -155,6 +172,12 @@ def _resolve_assets(
         for sound in target.get("sounds", []):
             name = sound.get("name", "")
             resolved_info = library.lookup_sound(name)
+            if not resolved_info:
+                fixed = best_match(name.lower(), library.get_all_sound_names(), margin=0.0)
+                if fixed:
+                    resolved_info = library.lookup_sound(fixed)
+                    print(f"[assets] sound {name!r} not in library, using {fixed!r}")
+                    sound["name"] = fixed
             if resolved_info:
                 sound["assetId"] = resolved_info["assetId"]
                 sound["md5ext"] = resolved_info["md5ext"]

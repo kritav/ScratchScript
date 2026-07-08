@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Optional
 
 import httpx
+
+# Words too generic to select assets by
+_STOPWORDS = {
+    "the", "and", "that", "with", "for", "make", "create", "add", "when",
+    "then", "have", "has", "can", "will", "should", "game", "project",
+    "sprite", "sprites", "player", "where", "which", "each", "every", "all",
+    "you", "your", "its", "his", "her", "they", "them", "from", "into",
+    "onto", "around", "moves", "moving", "clicked", "click", "press",
+    "pressed", "key", "score", "points", "using", "use", "like",
+}
 
 SCRATCH_ASSET_CDN = "https://assets.scratch.mit.edu"
 SCRATCH_GUI_RAW = "https://raw.githubusercontent.com/scratchfoundation/scratch-gui/develop/src/lib/libraries"
@@ -195,6 +206,29 @@ class AssetLibrary:
     def get_default_backdrop_svg(self) -> bytes:
         """Return a default white backdrop SVG."""
         return DEFAULT_BACKDROP_SVG.encode("utf-8")
+
+    def find_relevant_names(self, prompt: str) -> dict[str, list[str]]:
+        """Keyword-match a user prompt against library asset names.
+
+        Returns candidate costume/backdrop/sound names to inject into the
+        LLM prompt so it uses real asset names instead of guessing.
+        """
+        tokens = set()
+        for word in re.findall(r"[a-z]+", prompt.lower()):
+            if len(word) >= 3 and word not in _STOPWORDS:
+                tokens.add(word)
+                if word.endswith("s"):
+                    tokens.add(word[:-1])  # crude plural → singular
+
+        def search(names, limit: int) -> list[str]:
+            hits = [n for n in names if any(t in n for t in tokens)]
+            return sorted(hits)[:limit]
+
+        return {
+            "costumes": search(self._costumes, 40),
+            "backdrops": search(self._backdrops, 15),
+            "sounds": search(self._sounds, 20),
+        }
 
     def get_all_costume_names(self) -> list[str]:
         return sorted(self._costumes.keys())

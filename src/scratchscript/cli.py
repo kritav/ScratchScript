@@ -218,6 +218,7 @@ async def _compile_file(source_file: str, output: Optional[str], verbose: bool):
 
 def _try_compile(source: str, verbose: bool) -> Optional[dict]:
     """Try to compile ScratchScript source. Returns project.json dict or None."""
+    from .compiler.autorepair import repair_project
     from .compiler.parser import ParseError, parse
     from .compiler.codegen import generate
     from .compiler.validator import validate
@@ -228,6 +229,12 @@ def _try_compile(source: str, verbose: bool) -> Optional[dict]:
         if verbose:
             click.echo(f"Parse error: {e}", err=True)
         return None
+
+    # Deterministically fix near-miss block/event/reporter names before
+    # validation — no LLM round-trip needed for confident matches
+    repairs = repair_project(project)
+    for note in repairs:
+        click.echo(f"  {note}")
 
     # Validate
     result = validate(project)
@@ -248,12 +255,16 @@ def _try_compile(source: str, verbose: bool) -> Optional[dict]:
 
 def _get_compile_errors(source: str) -> str:
     """Get compile error messages for a source string."""
+    from .compiler.autorepair import repair_project
     from .compiler.parser import ParseError, parse
     from .compiler.validator import validate
 
     errors = []
     try:
         project = parse(source)
+        # Apply the same auto-repairs as _try_compile so the LLM only sees
+        # errors it actually needs to fix
+        repair_project(project)
         result = validate(project)
         if not result.is_valid:
             errors.append(result.format_errors())

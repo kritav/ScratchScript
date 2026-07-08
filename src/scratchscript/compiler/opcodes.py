@@ -503,3 +503,24 @@ UNARY_OPS: dict[str, str] = {
 
 # All block names for fuzzy matching
 ALL_BLOCK_NAMES: list[str] = list(OPCODES.keys())
+
+
+def format_signature(name: str) -> str:
+    """Render a block's usage signature, e.g. `glide to x y <secs> <x> <y>`.
+
+    Used in validator errors so the LLM sees correct usage, not just the name.
+    """
+    entry = OPCODES[name]
+    parts = [name]
+    for inp in entry.inputs:
+        if inp.type == "substack":
+            continue
+        parts.append(f"<{inp.name.lower()}>")
+    for f in entry.fields:
+        if f.values:
+            shown = "|".join(f.values[:4])
+            more = "|..." if len(f.values) > 4 else ""
+            parts.append(f"<{shown}{more}>")
+        else:
+            parts.append(f"<{f.name.lower()}>")
+    return " ".join(parts)

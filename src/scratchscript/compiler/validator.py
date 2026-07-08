@@ -30,7 +30,7 @@ from .ast_nodes import (
     UnaryOp,
     VarRef,
 )
-from .opcodes import ALL_BLOCK_NAMES, OPCODES
+from .opcodes import ALL_BLOCK_NAMES, OPCODES, format_signature
 
 
 class ValidationError:
@@ -219,21 +219,24 @@ class _Validator:
             if len(block.args) < len(entry.inputs):
                 self.result.add_warning(
                     f"Block {name!r} expects {len(entry.inputs)} argument(s) "
-                    f"but got {len(block.args)}",
+                    f"but got {len(block.args)}. Usage: {format_signature(name)}",
                     block.line,
                 )
         else:
-            # Unknown block — try fuzzy match
+            # Unknown block — try fuzzy match, showing full usage signatures
+            # so the LLM can fix the call without guessing arguments
             matches = get_close_matches(name, ALL_BLOCK_NAMES, n=3, cutoff=0.5)
             if matches:
-                suggestion = ", ".join(f"'{m}'" for m in matches)
+                suggestion = ", ".join(f"`{format_signature(m)}`" for m in matches)
                 self.result.add_error(
-                    f"Unknown block: {name!r}. Did you mean: {suggestion}?",
+                    f"Unknown block: {name!r}. Replace it with one of these "
+                    f"valid blocks: {suggestion}",
                     block.line,
                 )
             else:
                 self.result.add_error(
-                    f"Unknown block: {name!r}",
+                    f"Unknown block: {name!r}. This block does not exist in "
+                    f"ScratchScript — use only blocks from the DSL specification.",
                     block.line,
                 )
 
