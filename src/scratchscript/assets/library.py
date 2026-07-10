@@ -198,7 +198,7 @@ class AssetLibrary:
         expected_hash = md5ext.split(".")[0]
         actual_hash = hashlib.md5(cache_path.read_bytes()).hexdigest()
         if actual_hash != expected_hash:
-            # Don't delete — the file might still be usable
+            # Don't delete; the file might still be usable
             pass
 
         return cache_path
@@ -218,11 +218,10 @@ class AssetLibrary:
             if len(word) >= 3 and word not in _STOPWORDS:
                 tokens.add(word)
                 if word.endswith("s"):
-                    tokens.add(word[:-1])  # crude plural → singular
+                    tokens.add(word[:-1])  # plural to singular
 
         def search(names, limit: int) -> list[str]:
             # Round-robin across tokens so one keyword with many assets
-            # (e.g. "dinosaur") can't crowd out the others before the cap
             per_token = [sorted(n for n in names if t in n) for t in sorted(tokens)]
             hits: list[str] = []
             seen: set[str] = set()
