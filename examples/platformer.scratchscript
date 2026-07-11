@@ -64,7 +64,6 @@ project
         go to x y (pick random -200 200) (pick random -100 100)
         repeat until touching "Player"
           turn right 5
-          wait 0.05
         change score by 1
         start sound "Pop"
         delete this clone
