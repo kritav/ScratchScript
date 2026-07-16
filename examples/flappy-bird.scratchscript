@@ -30,7 +30,6 @@ project
             set y to 170
             set velocity to 0
           switch costume to "cat-a"
-          wait 0.05
 
     script
       when key space pressed

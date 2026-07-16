@@ -29,7 +29,6 @@ project
             set onGround to 1
           // animate
           next costume
-          wait 0.1
 
     script
       when key right arrow pressed
