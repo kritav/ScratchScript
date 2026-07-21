@@ -112,9 +112,7 @@ IMPORTANT: Before flagging any block name, argument, or value as invalid, check 
 
 ### Logic and Gameplay Errors
 - Missing collision detection between sprites that should interact.
-- Missing game over condition.
 - Missing score counting when the game should have a score.
-- Clones that are created but never deleted (hits 300 clone limit).
 - Missing initialization — variables and positions not reset on green flag.
 - Broken movement math (gravity should use velocity, not fixed position changes).
 - Costume names that don't exist in Scratch's library. Real assets include: "cat-a", "cat-b", "bear-a", "parrot-a", "parrot-b", "ball-a", "paddle", "button3". Flag invented names like "pipe-top", "bird-flying", "enemy-walk-1".
