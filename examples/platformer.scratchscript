@@ -19,7 +19,6 @@ project
         set score to 0
         show variable score
         forever
-          // gravity
           change velocityY by -1
           change y by velocityY
           // ground collision
