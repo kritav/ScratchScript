@@ -21,12 +21,10 @@ project
         forever
           change velocityY by -1
           change y by velocityY
-          // ground collision
           if y position < -150
             set y to -150
             set velocityY to 0
             set onGround to 1
-          // animate
           next costume
 
     script
